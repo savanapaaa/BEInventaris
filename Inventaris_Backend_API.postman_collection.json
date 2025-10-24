@@ -1,0 +1,337 @@
+{
+	"info": {
+		"name": "Inventaris Backend API",
+		"description": "Collection untuk testing Backend Inventaris Indonesia",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:5000"
+		}
+	],
+	"item": [
+		{
+			"name": "Auth",
+			"item": [
+				{
+					"name": "Test Basic Endpoint",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/",
+							"host": ["{{base_url}}"],
+							"path": [""]
+						}
+					}
+				},
+				{
+					"name": "Register User",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"username\": \"testuser\",\n  \"email\": \"test@example.com\",\n  \"password\": \"123456\",\n  \"role\": \"pengguna\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/auth/register",
+							"host": ["{{base_url}}"],
+							"path": ["api", "auth", "register"]
+						}
+					}
+				},
+				{
+					"name": "Login Admin",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const responseJson = pm.response.json();",
+									"    pm.environment.set(\"auth_token\", responseJson.token);",
+									"    console.log(\"Token saved:\", responseJson.token);",
+									"}"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"admin@inventaris.com\",\n  \"password\": \"admin123\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/auth/login",
+							"host": ["{{base_url}}"],
+							"path": ["api", "auth", "login"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Pengguna",
+			"item": [
+				{
+					"name": "Get Profile",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/pengguna/profil",
+							"host": ["{{base_url}}"],
+							"path": ["api", "pengguna", "profil"]
+						}
+					}
+				},
+				{
+					"name": "Get All Users (Admin Only)",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/pengguna",
+							"host": ["{{base_url}}"],
+							"path": ["api", "pengguna"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Kategori",
+			"item": [
+				{
+					"name": "Get All Kategori",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/kategori",
+							"host": ["{{base_url}}"],
+							"path": ["api", "kategori"]
+						}
+					}
+				},
+				{
+					"name": "Create Kategori",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"nama\": \"Elektronik\",\n  \"deskripsi\": \"Peralatan elektronik\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/kategori",
+							"host": ["{{base_url}}"],
+							"path": ["api", "kategori"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Produk",
+			"item": [
+				{
+					"name": "Get All Produk",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/produk?halaman=1&batas=10",
+							"host": ["{{base_url}}"],
+							"path": ["api", "produk"],
+							"query": [
+								{
+									"key": "halaman",
+									"value": "1"
+								},
+								{
+									"key": "batas",
+									"value": "10"
+								}
+							]
+						}
+					}
+				},
+				{
+					"name": "Create Produk",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"nama\": \"Laptop Asus\",\n  \"deskripsi\": \"Laptop Asus ROG Gaming\",\n  \"kategori_id\": 1,\n  \"jumlah_stok\": 5,\n  \"stok_minimum\": 1\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/produk",
+							"host": ["{{base_url}}"],
+							"path": ["api", "produk"]
+						}
+					}
+				},
+				{
+					"name": "Get Stok Rendah",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/produk/peringatan/stok-rendah",
+							"host": ["{{base_url}}"],
+							"path": ["api", "produk", "peringatan", "stok-rendah"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Transaksi",
+			"item": [
+				{
+					"name": "Get All Transaksi",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/transaksi?halaman=1&batas=10",
+							"host": ["{{base_url}}"],
+							"path": ["api", "transaksi"],
+							"query": [
+								{
+									"key": "halaman",
+									"value": "1"
+								},
+								{
+									"key": "batas",
+									"value": "10"
+								}
+							]
+						}
+					}
+				},
+				{
+					"name": "Stok Masuk",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"produk_id\": 1,\n  \"jenis\": \"masuk\",\n  \"jumlah\": 10,\n  \"catatan\": \"Pembelian baru dari supplier\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/transaksi",
+							"host": ["{{base_url}}"],
+							"path": ["api", "transaksi"]
+						}
+					}
+				},
+				{
+					"name": "Stok Keluar",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"produk_id\": 1,\n  \"jenis\": \"keluar\",\n  \"jumlah\": 2,\n  \"catatan\": \"Penjualan ke customer\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/transaksi",
+							"host": ["{{base_url}}"],
+							"path": ["api", "transaksi"]
+						}
+					}
+				},
+				{
+					"name": "Laporan Ringkasan Stok",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/transaksi/laporan/ringkasan-stok",
+							"host": ["{{base_url}}"],
+							"path": ["api", "transaksi", "laporan", "ringkasan-stok"]
+						}
+					}
+				}
+			]
+		}
+	]
+}
