@@ -1,21 +1,78 @@
-node_modules/
-.env
-.DS_Store
-*.log
-npm-debug.log*
+# Dependenciesnode_modules/
+
+node_modules/.env
+
+npm-debug.log*.DS_Store
+
+yarn-debug.log**.log
+
+yarn-error.log*npm-debug.log*
+
 yarn-debug.log*
-yarn-error.log*
+
+# Environment variablesyarn-error.log*
+
+.env.vscode/
+
+.env.local.idea/
+
+.env.productiondist/
+
+build/
+
+# IDE & Editor filescoverage/
+
 .vscode/
-.idea/
+
+.idea/# Documentation files (tidak perlu di repository)
+
+*.swp*.md
+
+*.swo!README.md
+
+
+
+# OS generated files# Test files
+
+.DS_Storetest-*.js
+
+.DS_Store?test.html
+
+._*fix-*.js
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Runtime data
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# Build outputs
 dist/
 build/
 coverage/
 
-# Documentation files (tidak perlu di repository)
-*.md
-!README.md
+# Uploads (keep directory structure but ignore files)
+uploads/**/*
+!uploads/.gitkeep
+!uploads/products/.gitkeep
 
-# Test files
+# Temporary files
+temp/
+tmp/
+*.tmp
+
+# Development files
+debug-*.js
 test-*.js
-test.html
-fix-*.js
+check-*.js
+simple-*.js
+setup-*.js
+*-test.js

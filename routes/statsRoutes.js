@@ -101,7 +101,7 @@ router.get('/', requireAuth, async (req, res) => {
       const [myRecentBorrowings] = await db.execute(`
         SELECT 
           p.id,
-          pr.nama as nama_produk,
+          pr.nama as nama_barang,
           p.tanggal_pinjam,
           p.tanggal_kembali_rencana,
           p.status,

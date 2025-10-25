@@ -13,12 +13,16 @@ router.get('/', async (req, res) => {
     );
     
     res.json({
+      success: true,
       message: 'Data kategori berhasil diambil',
       data: kategori
     });
   } catch (error) {
     console.error('Get kategori error:', error);
-    res.status(500).json({ error: 'Error saat mengambil data kategori' });
+    res.status(500).json({ 
+      success: false,
+      error: 'Error saat mengambil data kategori' 
+    });
   }
 });
 
@@ -33,16 +37,23 @@ router.get('/:id', async (req, res) => {
     );
 
     if (kategori.length === 0) {
-      return res.status(404).json({ error: 'Kategori tidak ditemukan' });
+      return res.status(404).json({ 
+        success: false,
+        error: 'Kategori tidak ditemukan' 
+      });
     }
 
     res.json({
+      success: true,
       message: 'Kategori berhasil diambil',
       data: kategori[0]
     });
   } catch (error) {
     console.error('Get kategori error:', error);
-    res.status(500).json({ error: 'Error saat mengambil kategori' });
+    res.status(500).json({ 
+      success: false,
+      error: 'Error saat mengambil kategori' 
+    });
   }
 });
 
@@ -54,7 +65,11 @@ router.post('/', authenticateToken, [
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
+      return res.status(400).json({ 
+        success: false,
+        error: 'Data tidak valid',
+        errors: errors.array() 
+      });
     }
 
     const { nama, deskripsi = '' } = req.body;
@@ -66,7 +81,10 @@ router.post('/', authenticateToken, [
     );
 
     if (existingKategori.length > 0) {
-      return res.status(400).json({ error: 'Kategori dengan nama tersebut sudah ada' });
+      return res.status(400).json({ 
+        success: false,
+        error: 'Kategori dengan nama tersebut sudah ada' 
+      });
     }
 
     const [result] = await db.execute(
@@ -75,12 +93,20 @@ router.post('/', authenticateToken, [
     );
 
     res.status(201).json({
+      success: true,
       message: 'Kategori berhasil dibuat',
-      kategoriId: result.insertId
+      data: {
+        id: result.insertId,
+        nama,
+        deskripsi
+      }
     });
   } catch (error) {
     console.error('Create kategori error:', error);
-    res.status(500).json({ error: 'Error saat membuat kategori' });
+    res.status(500).json({ 
+      success: false,
+      error: 'Error saat membuat kategori' 
+    });
   }
 });
 
@@ -92,7 +118,11 @@ router.put('/:id', authenticateToken, [
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
+      return res.status(400).json({ 
+        success: false,
+        error: 'Data tidak valid',
+        errors: errors.array() 
+      });
     }
 
     const kategoriId = parseInt(req.params.id);
@@ -105,7 +135,10 @@ router.put('/:id', authenticateToken, [
     );
 
     if (existingKategori.length === 0) {
-      return res.status(404).json({ error: 'Kategori tidak ditemukan' });
+      return res.status(404).json({ 
+        success: false,
+        error: 'Kategori tidak ditemukan' 
+      });
     }
 
     // Check if name already exists (excluding current category)
@@ -115,7 +148,10 @@ router.put('/:id', authenticateToken, [
     );
 
     if (duplicateKategori.length > 0) {
-      return res.status(400).json({ error: 'Kategori dengan nama tersebut sudah ada' });
+      return res.status(400).json({ 
+        success: false,
+        error: 'Kategori dengan nama tersebut sudah ada' 
+      });
     }
 
     const [result] = await db.execute(
@@ -123,10 +159,21 @@ router.put('/:id', authenticateToken, [
       [nama, deskripsi, kategoriId]
     );
 
-    res.json({ message: 'Kategori berhasil diupdate' });
+    res.json({ 
+      success: true,
+      message: 'Kategori berhasil diupdate',
+      data: {
+        id: kategoriId,
+        nama,
+        deskripsi
+      }
+    });
   } catch (error) {
     console.error('Update kategori error:', error);
-    res.status(500).json({ error: 'Error saat mengupdate kategori' });
+    res.status(500).json({ 
+      success: false,
+      error: 'Error saat mengupdate kategori' 
+    });
   }
 });
 
@@ -134,6 +181,19 @@ router.put('/:id', authenticateToken, [
 router.delete('/:id', authenticateToken, async (req, res) => {
   try {
     const kategoriId = parseInt(req.params.id);
+
+    // Check if category exists first
+    const [existingKategori] = await db.execute(
+      'SELECT id, nama FROM kategori WHERE id = ?',
+      [kategoriId]
+    );
+
+    if (existingKategori.length === 0) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'Kategori tidak ditemukan' 
+      });
+    }
 
     // Check if category has products
     const [produk] = await db.execute(
@@ -143,20 +203,34 @@ router.delete('/:id', authenticateToken, async (req, res) => {
 
     if (produk.length > 0) {
       return res.status(400).json({ 
-        error: 'Tidak dapat menghapus kategori yang masih memiliki produk' 
+        success: false,
+        error: `Tidak dapat menghapus kategori "${existingKategori[0].nama}" karena masih memiliki ${produk.length} produk. Hapus atau pindahkan produk terlebih dahulu.`
       });
     }
 
     const [result] = await db.execute('DELETE FROM kategori WHERE id = ?', [kategoriId]);
 
     if (result.affectedRows === 0) {
-      return res.status(404).json({ error: 'Kategori tidak ditemukan' });
+      return res.status(404).json({ 
+        success: false,
+        error: 'Kategori tidak ditemukan' 
+      });
     }
 
-    res.json({ message: 'Kategori berhasil dihapus' });
+    res.json({ 
+      success: true,
+      message: `Kategori "${existingKategori[0].nama}" berhasil dihapus`,
+      data: {
+        id: kategoriId,
+        nama: existingKategori[0].nama
+      }
+    });
   } catch (error) {
     console.error('Delete kategori error:', error);
-    res.status(500).json({ error: 'Error saat menghapus kategori' });
+    res.status(500).json({ 
+      success: false,
+      error: 'Error saat menghapus kategori' 
+    });
   }
 });
 

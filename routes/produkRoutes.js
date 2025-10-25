@@ -3,6 +3,7 @@ const { body, validationResult } = require('express-validator');
 const { authenticateToken } = require('../middleware/auth');
 const db = require('../config/database');
 const { logActivity } = require('./riwayatRoutes');
+// const { getImageUrl, deleteUploadedFile } = require('../middleware/uploadProductImage'); // Temporarily disabled
 
 const router = express.Router();
 
@@ -45,6 +46,30 @@ router.get('/', async (req, res) => {
       [...queryParams, batas, offset]
     );
 
+    // Add full image URLs to response with safer approach
+    const produkWithImages = produk.map(item => {
+      let gambar_url = null;
+      try {
+        if (item.gambar) {
+          if (item.gambar.startsWith('http://') || item.gambar.startsWith('https://')) {
+            gambar_url = item.gambar;
+          } else if (item.gambar.startsWith('/uploads/')) {
+            gambar_url = `${req.protocol}://${req.get('host')}${item.gambar}`;
+          } else {
+            gambar_url = `${req.protocol}://${req.get('host')}/uploads/products/${item.gambar}`;
+          }
+        }
+      } catch (error) {
+        console.error('Error processing image URL:', error);
+        gambar_url = null;
+      }
+      
+      return {
+        ...item,
+        gambar_url
+      };
+    });
+
     // Get total count
     const [countResult] = await db.execute(
       `SELECT COUNT(*) as total FROM produk p ${whereClause}`,
@@ -55,18 +80,23 @@ router.get('/', async (req, res) => {
     const totalHalaman = Math.ceil(total / batas);
 
     res.json({
-      message: 'Data produk berhasil diambil',
-      data: produk,
-      paginasi: {
-        halamanSaatIni: halaman,
-        totalHalaman: totalHalaman,
-        totalItem: total,
-        itemPerHalaman: batas
+      success: true,
+      message: 'Data barang berhasil diambil',
+      data: produkWithImages,
+      pagination: {
+        halaman,
+        batas,
+        total,
+        totalHalaman
       }
     });
   } catch (error) {
     console.error('Get produk error:', error);
-    res.status(500).json({ error: 'Error saat mengambil data produk' });
+    res.status(500).json({ 
+      success: false,
+      error: 'Error saat mengambil data barang',
+      details: error.message 
+    });
   }
 });
 
@@ -90,7 +120,10 @@ router.get('/:id', async (req, res) => {
     );
 
     if (produk.length === 0) {
-      return res.status(404).json({ error: 'Produk tidak ditemukan' });
+      return res.status(404).json({ 
+        success: false,
+        error: 'Barang tidak ditemukan' 
+      });
     }
 
     // Get current borrowing info if product is borrowed
@@ -108,16 +141,39 @@ router.get('/:id', async (req, res) => {
       }
     }
 
+    // Process image URL safely
+    let gambar_url = null;
+    try {
+      if (produk[0].gambar) {
+        if (produk[0].gambar.startsWith('http://') || produk[0].gambar.startsWith('https://')) {
+          gambar_url = produk[0].gambar;
+        } else if (produk[0].gambar.startsWith('/uploads/')) {
+          gambar_url = `${req.protocol}://${req.get('host')}${produk[0].gambar}`;
+        } else {
+          gambar_url = `${req.protocol}://${req.get('host')}/uploads/products/${produk[0].gambar}`;
+        }
+      }
+    } catch (error) {
+      console.error('Error processing image URL:', error);
+      gambar_url = null;
+    }
+
     res.json({
-      message: 'Produk berhasil diambil',
+      success: true,
+      message: 'Barang berhasil diambil',
       data: {
         ...produk[0],
+        gambar_url,
         info_peminjaman: peminjamInfo
       }
     });
   } catch (error) {
     console.error('Get produk error:', error);
-    res.status(500).json({ error: 'Error saat mengambil produk' });
+    res.status(500).json({ 
+      success: false,
+      error: 'Error saat mengambil produk',
+      details: error.message 
+    });
   }
 });
 
@@ -149,14 +205,42 @@ router.get('/status/tersedia', authenticateToken, async (req, res) => {
       queryParams
     );
 
+    // Add image URLs with safe processing
+    const produkWithImages = produk.map(item => {
+      let gambar_url = null;
+      try {
+        if (item.gambar) {
+          if (item.gambar.startsWith('http://') || item.gambar.startsWith('https://')) {
+            gambar_url = item.gambar;
+          } else if (item.gambar.startsWith('/uploads/')) {
+            gambar_url = `${req.protocol}://${req.get('host')}${item.gambar}`;
+          } else {
+            gambar_url = `${req.protocol}://${req.get('host')}/uploads/products/${item.gambar}`;
+          }
+        }
+      } catch (error) {
+        console.error('Error processing image URL:', error);
+        gambar_url = null;
+      }
+      
+      return {
+        ...item,
+        gambar_url
+      };
+    });
+
     res.json({
       success: true,
       message: 'Produk tersedia berhasil diambil',
-      data: produk
+      data: produkWithImages
     });
   } catch (error) {
     console.error('Get available products error:', error);
-    res.status(500).json({ error: 'Error saat mengambil produk tersedia' });
+    res.status(500).json({ 
+      success: false,
+      error: 'Error saat mengambil produk tersedia',
+      details: error.message 
+    });
   }
 });
 
@@ -178,7 +262,8 @@ router.post('/', authenticateToken, [
       deskripsi = '', 
       kategori_id, 
       jumlah_stok, 
-      stok_minimum = 0 
+      stok_minimum = 0,
+      gambar = null
     } = req.body;
 
     // Check if product name already exists in same category
@@ -203,9 +288,9 @@ router.post('/', authenticateToken, [
 
     const [result] = await db.execute(
       `INSERT INTO produk 
-       (nama, deskripsi, kategori_id, jumlah_stok, stok_minimum, dibuat_pada) 
-       VALUES (?, ?, ?, ?, ?, NOW())`,
-      [nama, deskripsi, kategori_id, jumlah_stok, stok_minimum]
+       (nama, deskripsi, gambar, kategori_id, jumlah_stok, stok_minimum, dibuat_pada) 
+       VALUES (?, ?, ?, ?, ?, ?, NOW())`,
+      [nama, deskripsi, gambar, kategori_id, jumlah_stok, stok_minimum]
     );
 
     // Log activity
@@ -215,12 +300,12 @@ router.post('/', authenticateToken, [
       result.insertId,
       'buat',
       null,
-      { nama, deskripsi, kategori_id, jumlah_stok, stok_minimum },
+      { nama, deskripsi, gambar, kategori_id, jumlah_stok, stok_minimum },
       `Membuat produk baru: ${nama}`
     );
 
     res.status(201).json({
-      message: 'Produk berhasil dibuat',
+      message: 'Barang berhasil dibuat',
       produkId: result.insertId
     });
   } catch (error) {
@@ -239,54 +324,109 @@ router.put('/:id', authenticateToken, [
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
+      return res.status(400).json({ 
+        success: false,
+        error: 'Data tidak valid',
+        errors: errors.array() 
+      });
     }
 
     const produkId = parseInt(req.params.id);
-    const { nama, deskripsi, kategori_id, jumlah_stok, stok_minimum } = req.body;
+    const { nama, deskripsi, kategori_id, jumlah_stok, stok_minimum, gambar } = req.body;
 
-    // Check if product exists
-    const [existingProduk] = await db.execute(
-      'SELECT id FROM produk WHERE id = ?',
+    // Handle undefined parameters - ensure all have safe defaults
+    const gambarValue = gambar !== undefined ? gambar : null;
+    const deskripsiValue = deskripsi !== undefined ? deskripsi : null;
+    const namaValue = nama || '';
+    const kategoriIdValue = parseInt(kategori_id) || 0;
+    const jumlahStokValue = parseInt(jumlah_stok) || 0;
+    const stokMinimumValue = parseInt(stok_minimum) || 0;
+
+    // Get current product data for comparison
+    const [currentProduct] = await db.execute(
+      'SELECT * FROM produk WHERE id = ?',
       [produkId]
     );
 
-    if (existingProduk.length === 0) {
-      return res.status(404).json({ error: 'Produk tidak ditemukan' });
+    if (currentProduct.length === 0) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'Barang tidak ditemukan' 
+      });
     }
+
+    const oldData = currentProduct[0];
 
     // Check if product name already exists in same category (excluding current product)
     const [duplicateProduk] = await db.execute(
       'SELECT id FROM produk WHERE nama = ? AND kategori_id = ? AND id != ?',
-      [nama, kategori_id, produkId]
+      [namaValue, kategoriIdValue, produkId]
     );
 
     if (duplicateProduk.length > 0) {
-      return res.status(400).json({ error: 'Produk dengan nama tersebut sudah ada dalam kategori ini' });
+      return res.status(400).json({ 
+        success: false,
+        error: 'Produk dengan nama tersebut sudah ada dalam kategori ini' 
+      });
     }
 
     // Check if category exists
     const [kategori] = await db.execute(
       'SELECT id FROM kategori WHERE id = ?',
-      [kategori_id]
+      [kategoriIdValue]
     );
 
     if (kategori.length === 0) {
-      return res.status(400).json({ error: 'Kategori tidak ditemukan' });
+      return res.status(400).json({ 
+        success: false,
+        error: 'Kategori tidak ditemukan' 
+      });
     }
 
     const [result] = await db.execute(
       `UPDATE produk 
-       SET nama = ?, deskripsi = ?, kategori_id = ?, 
+       SET nama = ?, deskripsi = ?, gambar = ?, kategori_id = ?, 
            jumlah_stok = ?, stok_minimum = ?, diperbarui_pada = NOW() 
        WHERE id = ?`,
-      [nama, deskripsi, kategori_id, jumlah_stok, stok_minimum, produkId]
+      [namaValue, deskripsiValue, gambarValue, kategoriIdValue, jumlahStokValue, stokMinimumValue, produkId]
     );
 
-    res.json({ message: 'Produk berhasil diupdate' });
+    // If image was changed and old image exists, delete old image file
+    if (gambarValue !== oldData.gambar && oldData.gambar) {
+      // TODO: Implement file deletion when upload middleware is re-enabled
+      console.log('Image changed, old image should be deleted:', oldData.gambar);
+    }
+
+    // Log activity
+    await logActivity(
+      req.user.userId,
+      'produk',
+      produkId,
+      'update',
+      oldData,
+      { nama: namaValue, deskripsi: deskripsiValue, gambar: gambarValue, kategori_id: kategoriIdValue, jumlah_stok: jumlahStokValue, stok_minimum: stokMinimumValue },
+      `Mengupdate produk: ${namaValue}`
+    );
+
+    res.json({ 
+      success: true,
+      message: 'Barang berhasil diupdate',
+      data: {
+        id: produkId,
+        nama: namaValue,
+        deskripsi: deskripsiValue,
+        gambar: gambarValue,
+        kategori_id: kategoriIdValue,
+        jumlah_stok: jumlahStokValue,
+        stok_minimum: stokMinimumValue
+      }
+    });
   } catch (error) {
     console.error('Update produk error:', error);
-    res.status(500).json({ error: 'Error saat mengupdate produk' });
+    res.status(500).json({ 
+      success: false,
+      error: 'Error saat mengupdate produk' 
+    });
   }
 });
 
@@ -295,13 +435,33 @@ router.delete('/:id', authenticateToken, async (req, res) => {
   try {
     const produkId = parseInt(req.params.id);
 
-    const [result] = await db.execute('DELETE FROM produk WHERE id = ?', [produkId]);
-
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ error: 'Produk tidak ditemukan' });
+    // Get product data before deletion (to delete associated image)
+    const [produk] = await db.execute('SELECT * FROM produk WHERE id = ?', [produkId]);
+    
+    if (produk.length === 0) {
+      return res.status(404).json({ error: 'Barang tidak ditemukan' });
     }
 
-    res.json({ message: 'Produk berhasil dihapus' });
+    const [result] = await db.execute('DELETE FROM produk WHERE id = ?', [produkId]);
+
+    // Delete associated image file if exists
+    if (produk[0].gambar) {
+      // TODO: Implement file deletion when upload middleware is re-enabled
+      console.log('Product deleted, image should be deleted:', produk[0].gambar);
+    }
+
+    // Log activity
+    await logActivity(
+      req.user.userId,
+      'produk',
+      produkId,
+      'hapus',
+      produk[0],
+      null,
+      `Menghapus produk: ${produk[0].nama}`
+    );
+
+    res.json({ message: 'Barang berhasil dihapus' });
   } catch (error) {
     console.error('Delete produk error:', error);
     res.status(500).json({ error: 'Error saat menghapus produk' });
@@ -319,13 +479,37 @@ router.get('/peringatan/stok-rendah', authenticateToken, async (req, res) => {
        ORDER BY p.jumlah_stok ASC`
     );
 
+    // Add image URLs with safe processing
+    const produkWithImages = produk.map(item => {
+      let gambar_url = null;
+      try {
+        if (item.gambar) {
+          if (item.gambar.startsWith('http://') || item.gambar.startsWith('https://')) {
+            gambar_url = item.gambar;
+          } else if (item.gambar.startsWith('/uploads/')) {
+            gambar_url = `${req.protocol}://${req.get('host')}${item.gambar}`;
+          } else {
+            gambar_url = `${req.protocol}://${req.get('host')}/uploads/products/${item.gambar}`;
+          }
+        }
+      } catch (error) {
+        console.error('Error processing image URL:', error);
+        gambar_url = null;
+      }
+      
+      return {
+        ...item,
+        gambar_url
+      };
+    });
+
     res.json({
-      message: 'Data produk dengan stok rendah berhasil diambil',
-      data: produk
+      message: 'Data barang dengan stok rendah berhasil diambil',
+      data: produkWithImages
     });
   } catch (error) {
     console.error('Get stok rendah produk error:', error);
-    res.status(500).json({ error: 'Error saat mengambil data produk stok rendah' });
+    res.status(500).json({ error: 'Error saat mengambil data barang stok rendah' });
   }
 });
 
