@@ -1,7 +1,9 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { authenticateToken, requireAdmin } = require('../middleware/auth');
+const { uploadBuktiFotoMiddleware } = require('../middleware/uploadBuktiFoto');
 const db = require('../config/database');
+const path = require('path');
 
 const router = express.Router();
 
@@ -76,9 +78,12 @@ router.get('/', authenticateToken, async (req, res) => {
     const [peminjaman] = await db.execute(
       `SELECT p.*, 
               pr.nama as nama_barang, 
+              pr.nama as produk_nama,
               pm.nama_pengguna as nama_peminjam,
+              pm.nama_pengguna as nama_pengguna,
               pt.nama_pengguna as nama_petugas,
-              DATEDIFF(CURDATE(), p.tanggal_kembali_rencana) as hari_terlambat
+              DATEDIFF(CURDATE(), p.tanggal_kembali_rencana) as hari_terlambat,
+              p.foto_bukti_pengembalian
        FROM peminjaman p 
        LEFT JOIN produk pr ON p.produk_id = pr.id 
        LEFT JOIN pengguna pm ON p.peminjam_id = pm.id 
@@ -142,9 +147,11 @@ router.get('/user', authenticateToken, async (req, res) => {
     const [peminjaman] = await db.execute(
       `SELECT p.*, 
               pr.nama as nama_barang,
-              pr.kode as kode_barang,
+              pr.nama as produk_nama,
+              pr.deskripsi as deskripsi_barang,
               k.nama as kategori_nama,
-              DATEDIFF(CURDATE(), p.tanggal_kembali_rencana) as hari_terlambat
+              DATEDIFF(CURDATE(), p.tanggal_kembali_rencana) as hari_terlambat,
+              p.foto_bukti_pengembalian
        FROM peminjaman p 
        LEFT JOIN produk pr ON p.produk_id = pr.id 
        LEFT JOIN kategori k ON pr.kategori_id = k.id
@@ -192,7 +199,9 @@ router.get('/user/riwayat', authenticateToken, async (req, res) => {
     const [peminjaman] = await db.execute(
       `SELECT p.*, 
               pr.nama as nama_barang,
-              DATEDIFF(CURDATE(), p.tanggal_kembali_rencana) as hari_terlambat
+              pr.nama as produk_nama,
+              DATEDIFF(CURDATE(), p.tanggal_kembali_rencana) as hari_terlambat,
+              p.foto_bukti_pengembalian
        FROM peminjaman p 
        LEFT JOIN produk pr ON p.produk_id = pr.id 
        WHERE p.peminjam_id = ?
@@ -236,11 +245,14 @@ router.get('/:id', authenticateToken, async (req, res) => {
     const [peminjaman] = await db.execute(
       `SELECT p.*, 
               pr.nama as nama_barang, 
+              pr.nama as produk_nama,
               pr.deskripsi as deskripsi_barang,
               pm.nama_pengguna as nama_peminjam,
+              pm.nama_pengguna as nama_pengguna,
               pm.email as email_peminjam,
               pt.nama_pengguna as nama_petugas,
-              DATEDIFF(CURDATE(), p.tanggal_kembali_rencana) as hari_terlambat
+              DATEDIFF(CURDATE(), p.tanggal_kembali_rencana) as hari_terlambat,
+              p.foto_bukti_pengembalian
        FROM peminjaman p 
        LEFT JOIN produk pr ON p.produk_id = pr.id 
        LEFT JOIN pengguna pm ON p.peminjam_id = pm.id 
@@ -389,9 +401,10 @@ router.post('/', [
   }
 });
 
-// Return borrowed item (Kembalikan barang)
+// Return borrowed item (Kembalikan barang) with photo evidence
 router.put('/:id/kembalikan', [
   authenticateToken,
+  uploadBuktiFotoMiddleware, // Handle file upload first
   body('kondisi_kembali').notEmpty().withMessage('Kondisi pengembalian harus diisi'),
   body('catatan').optional()
 ], async (req, res) => {
@@ -407,12 +420,18 @@ router.put('/:id/kembalikan', [
     const { id } = req.params;
     const { kondisi_kembali, catatan = '' } = req.body;
     const tanggal_kembali_aktual = new Date().toISOString().split('T')[0];
+    
+    // Get foto bukti URL if file uploaded
+    let foto_bukti_url = null;
+    if (req.file) {
+      foto_bukti_url = `/uploads/bukti-pengembalian/${req.file.filename}`;
+    }
 
     // Start transaction
     await db.query('START TRANSACTION');
 
     try {
-      // Get peminjaman details
+      // Get peminjaman details dengan validasi user ownership
       const [peminjaman] = await db.execute(
         'SELECT * FROM peminjaman WHERE id = ? FOR UPDATE',
         [id]
@@ -423,6 +442,15 @@ router.put('/:id/kembalikan', [
         return res.status(404).json({ 
           success: false,
           error: 'Peminjaman tidak ditemukan' 
+        });
+      }
+
+      // Check if user owns this borrowing (unless admin)
+      if (req.user.peran !== 'admin' && peminjaman[0].peminjam_id !== req.user.userId) {
+        await db.query('ROLLBACK');
+        return res.status(403).json({ 
+          success: false,
+          error: 'Anda tidak memiliki akses untuk mengembalikan peminjaman ini' 
         });
       }
 
@@ -444,13 +472,15 @@ router.put('/:id/kembalikan', [
         denda = hariTerlambat * 5000; // Rp 5000 per hari
       }
 
-      // Update peminjaman
+      // Update peminjaman with photo evidence
       await db.execute(
         `UPDATE peminjaman 
          SET tanggal_kembali_aktual = ?, kondisi_kembali = ?, catatan = ?, 
-             denda = ?, status = 'dikembalikan', diperbarui_pada = NOW()
+             denda = ?, status = 'dikembalikan', 
+             foto_bukti_pengembalian = ?, catatan_pengembalian = ?,
+             diperbarui_pada = NOW()
          WHERE id = ?`,
-        [tanggal_kembali_aktual, kondisi_kembali, catatan, denda, id]
+        [tanggal_kembali_aktual, kondisi_kembali, catatan, denda, foto_bukti_url, catatan, id]
       );
 
       // Update product status back to available
@@ -469,9 +499,11 @@ router.put('/:id/kembalikan', [
         { 
           status: 'dikembalikan', 
           tanggal_kembali_aktual,
+          kondisi_kembali,
+          foto_bukti_pengembalian: foto_bukti_url || null,
           denda: denda > 0 ? denda : null
         },
-        `Mengembalikan barang${denda > 0 ? ` dengan denda Rp ${denda.toLocaleString()}` : ''}`
+        `Mengembalikan barang${denda > 0 ? ` dengan denda Rp ${denda.toLocaleString()}` : ''}${foto_bukti_url ? ' dengan foto bukti' : ''}`
       );
 
       await db.query('COMMIT');
@@ -480,10 +512,14 @@ router.put('/:id/kembalikan', [
         success: true,
         message: 'Barang berhasil dikembalikan',
         data: {
+          id: parseInt(id),
           tanggal_kembali_aktual,
           kondisi_kembali,
           denda,
-          hari_terlambat: hariTerlambat
+          hari_terlambat: hariTerlambat,
+          foto_bukti_pengembalian: foto_bukti_url || null,
+          catatan_pengembalian: catatan,
+          status: 'dikembalikan'
         }
       });
     } catch (error) {
@@ -505,9 +541,12 @@ router.get('/admin/terlambat', requireAdmin, async (req, res) => {
     const [peminjaman] = await db.execute(
       `SELECT p.*, 
               pr.nama as nama_barang,
+              pr.nama as produk_nama,
               pm.nama_pengguna as nama_peminjam,
+              pm.nama_pengguna as nama_pengguna,
               pm.email as email_peminjam,
-              DATEDIFF(CURDATE(), p.tanggal_kembali_rencana) as hari_terlambat
+              DATEDIFF(CURDATE(), p.tanggal_kembali_rencana) as hari_terlambat,
+              p.foto_bukti_pengembalian
        FROM peminjaman p 
        LEFT JOIN produk pr ON p.produk_id = pr.id 
        LEFT JOIN pengguna pm ON p.peminjam_id = pm.id
