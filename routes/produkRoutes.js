@@ -3,7 +3,7 @@ const { body, validationResult } = require('express-validator');
 const { authenticateToken } = require('../middleware/auth');
 const db = require('../config/database');
 const { logActivity } = require('./riwayatRoutes');
-// const { getImageUrl, deleteUploadedFile } = require('../middleware/uploadProductImage'); // Temporarily disabled
+const { handleProductImageUpload, deleteUploadedFile, getImageUrl } = require('../middleware/uploadProductImage');
 
 const router = express.Router();
 
@@ -244,7 +244,296 @@ router.get('/status/tersedia', authenticateToken, async (req, res) => {
   }
 });
 
-// Create new product
+// Create new product with file upload support
+router.post('/with-upload', [
+  authenticateToken,
+  handleProductImageUpload // Handle file upload first
+], async (req, res) => {
+  try {
+    console.log('📤 Creating product with file upload...');
+    console.log('📋 Request body:', req.body);
+    console.log('📁 Uploaded file:', req.uploadedFile);
+
+    // Extract data from form
+    const { 
+      nama, 
+      deskripsi = '', 
+      kategori_id, 
+      jumlah_stok, 
+      stok_minimum = 0
+    } = req.body;
+
+    // Validate required fields
+    if (!nama || !kategori_id || !jumlah_stok) {
+      // Delete uploaded file if validation fails
+      if (req.uploadedFile) {
+        deleteUploadedFile(req.uploadedFile.filename);
+      }
+      return res.status(400).json({ 
+        success: false,
+        error: 'Nama produk, kategori, dan jumlah stok harus diisi' 
+      });
+    }
+
+    // Parse numeric values
+    const kategoriIdValue = parseInt(kategori_id);
+    const jumlahStokValue = parseInt(jumlah_stok);
+    const stokMinimumValue = parseInt(stok_minimum);
+
+    // Validate numeric values
+    if (isNaN(kategoriIdValue) || kategoriIdValue < 1) {
+      if (req.uploadedFile) deleteUploadedFile(req.uploadedFile.filename);
+      return res.status(400).json({ 
+        success: false,
+        error: 'Kategori ID harus berupa angka positif' 
+      });
+    }
+
+    if (isNaN(jumlahStokValue) || jumlahStokValue < 0) {
+      if (req.uploadedFile) deleteUploadedFile(req.uploadedFile.filename);
+      return res.status(400).json({ 
+        success: false,
+        error: 'Jumlah stok harus berupa angka positif atau nol' 
+      });
+    }
+
+    // Check if product name already exists in same category
+    const [existingProduk] = await db.execute(
+      'SELECT id FROM produk WHERE nama = ? AND kategori_id = ?',
+      [nama, kategoriIdValue]
+    );
+
+    if (existingProduk.length > 0) {
+      if (req.uploadedFile) deleteUploadedFile(req.uploadedFile.filename);
+      return res.status(400).json({ 
+        success: false,
+        error: 'Produk dengan nama tersebut sudah ada dalam kategori ini' 
+      });
+    }
+
+    // Check if category exists
+    const [kategori] = await db.execute(
+      'SELECT id FROM kategori WHERE id = ?',
+      [kategoriIdValue]
+    );
+
+    if (kategori.length === 0) {
+      if (req.uploadedFile) deleteUploadedFile(req.uploadedFile.filename);
+      return res.status(400).json({ 
+        success: false,
+        error: 'Kategori tidak ditemukan' 
+      });
+    }
+
+    // Use uploaded file path or null
+    const gambarPath = req.uploadedFile ? req.uploadedFile.relativePath : null;
+
+    // Insert product
+    const [result] = await db.execute(
+      `INSERT INTO produk 
+       (nama, deskripsi, gambar, kategori_id, jumlah_stok, stok_minimum, dibuat_pada) 
+       VALUES (?, ?, ?, ?, ?, ?, NOW())`,
+      [nama, deskripsi, gambarPath, kategoriIdValue, jumlahStokValue, stokMinimumValue]
+    );
+
+    // Log activity
+    await logActivity(
+      req.user.userId,
+      'produk',
+      result.insertId,
+      'buat',
+      null,
+      { 
+        nama, 
+        deskripsi, 
+        gambar: gambarPath, 
+        kategori_id: kategoriIdValue, 
+        jumlah_stok: jumlahStokValue, 
+        stok_minimum: stokMinimumValue 
+      },
+      `Membuat produk baru dengan upload: ${nama}`
+    );
+
+    res.status(201).json({
+      success: true,
+      message: 'Produk berhasil dibuat dengan upload gambar',
+      data: {
+        id: result.insertId,
+        nama,
+        deskripsi,
+        gambar: gambarPath,
+        gambar_url: req.uploadedFile ? req.uploadedFile.url : null,
+        kategori_id: kategoriIdValue,
+        jumlah_stok: jumlahStokValue,
+        stok_minimum: stokMinimumValue
+      }
+    });
+  } catch (error) {
+    console.error('Create produk with upload error:', error);
+    
+    // Delete uploaded file on error
+    if (req.uploadedFile) {
+      deleteUploadedFile(req.uploadedFile.filename);
+    }
+    
+    res.status(500).json({ 
+      success: false,
+      error: 'Error saat membuat produk dengan upload' 
+    });
+  }
+});
+
+// Update product with file upload support
+router.put('/:id/with-upload', [
+  authenticateToken,
+  handleProductImageUpload // Handle file upload first
+], async (req, res) => {
+  try {
+    console.log('📤 Updating product with file upload...');
+    console.log('📋 Request body:', req.body);
+    console.log('📁 Uploaded file:', req.uploadedFile);
+
+    const produkId = parseInt(req.params.id);
+    const { nama, deskripsi, kategori_id, jumlah_stok, stok_minimum } = req.body;
+
+    // Validate required fields
+    if (!nama || !kategori_id || !jumlah_stok) {
+      if (req.uploadedFile) deleteUploadedFile(req.uploadedFile.filename);
+      return res.status(400).json({ 
+        success: false,
+        error: 'Nama produk, kategori, dan jumlah stok harus diisi' 
+      });
+    }
+
+    // Parse numeric values
+    const kategoriIdValue = parseInt(kategori_id);
+    const jumlahStokValue = parseInt(jumlah_stok);
+    const stokMinimumValue = parseInt(stok_minimum) || 0;
+
+    // Validate numeric values
+    if (isNaN(kategoriIdValue) || kategoriIdValue < 1) {
+      if (req.uploadedFile) deleteUploadedFile(req.uploadedFile.filename);
+      return res.status(400).json({ 
+        success: false,
+        error: 'Kategori ID harus berupa angka positif' 
+      });
+    }
+
+    // Get current product data
+    const [currentProduct] = await db.execute(
+      'SELECT * FROM produk WHERE id = ?',
+      [produkId]
+    );
+
+    if (currentProduct.length === 0) {
+      if (req.uploadedFile) deleteUploadedFile(req.uploadedFile.filename);
+      return res.status(404).json({ 
+        success: false,
+        error: 'Produk tidak ditemukan' 
+      });
+    }
+
+    const oldData = currentProduct[0];
+
+    // Check if product name already exists (excluding current product)
+    const [duplicateProduk] = await db.execute(
+      'SELECT id FROM produk WHERE nama = ? AND kategori_id = ? AND id != ?',
+      [nama, kategoriIdValue, produkId]
+    );
+
+    if (duplicateProduk.length > 0) {
+      if (req.uploadedFile) deleteUploadedFile(req.uploadedFile.filename);
+      return res.status(400).json({ 
+        success: false,
+        error: 'Produk dengan nama tersebut sudah ada dalam kategori ini' 
+      });
+    }
+
+    // Check if category exists
+    const [kategori] = await db.execute(
+      'SELECT id FROM kategori WHERE id = ?',
+      [kategoriIdValue]
+    );
+
+    if (kategori.length === 0) {
+      if (req.uploadedFile) deleteUploadedFile(req.uploadedFile.filename);
+      return res.status(400).json({ 
+        success: false,
+        error: 'Kategori tidak ditemukan' 
+      });
+    }
+
+    // Determine image path
+    let gambarPath = oldData.gambar; // Keep old image by default
+    
+    if (req.uploadedFile) {
+      // New image uploaded, use new path
+      gambarPath = req.uploadedFile.relativePath;
+      
+      // Delete old image file if it exists and is a local file
+      if (oldData.gambar && oldData.gambar.startsWith('/uploads/')) {
+        const oldFilename = oldData.gambar.split('/').pop();
+        deleteUploadedFile(oldFilename);
+      }
+    }
+
+    // Update product
+    const [result] = await db.execute(
+      `UPDATE produk 
+       SET nama = ?, deskripsi = ?, gambar = ?, kategori_id = ?, 
+           jumlah_stok = ?, stok_minimum = ?, diperbarui_pada = NOW() 
+       WHERE id = ?`,
+      [nama, deskripsi, gambarPath, kategoriIdValue, jumlahStokValue, stokMinimumValue, produkId]
+    );
+
+    // Log activity
+    await logActivity(
+      req.user.userId,
+      'produk',
+      produkId,
+      'ubah',
+      oldData,
+      { 
+        nama, 
+        deskripsi, 
+        gambar: gambarPath, 
+        kategori_id: kategoriIdValue, 
+        jumlah_stok: jumlahStokValue, 
+        stok_minimum: stokMinimumValue 
+      },
+      `Mengupdate produk dengan upload: ${nama}`
+    );
+
+    res.json({ 
+      success: true,
+      message: 'Produk berhasil diupdate dengan upload gambar',
+      data: {
+        id: produkId,
+        nama,
+        deskripsi,
+        gambar: gambarPath,
+        gambar_url: req.uploadedFile ? req.uploadedFile.url : getImageUrl(req, gambarPath),
+        kategori_id: kategoriIdValue,
+        jumlah_stok: jumlahStokValue,
+        stok_minimum: stokMinimumValue
+      }
+    });
+  } catch (error) {
+    console.error('Update produk with upload error:', error);
+    
+    // Delete uploaded file on error
+    if (req.uploadedFile) {
+      deleteUploadedFile(req.uploadedFile.filename);
+    }
+    
+    res.status(500).json({ 
+      success: false,
+      error: 'Error saat mengupdate produk dengan upload' 
+    });
+  }
+});
+
+// Create new product (JSON only - existing endpoint)
 router.post('/', authenticateToken, [
   body('nama').notEmpty().withMessage('Nama produk diperlukan'),
   body('kategori_id').isInt({ min: 1 }).withMessage('Kategori ID harus berupa angka positif'),

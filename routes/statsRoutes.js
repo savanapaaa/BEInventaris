@@ -30,6 +30,7 @@ router.get('/', requireAuth, async (req, res) => {
         SELECT 
           COUNT(*) as total_peminjaman,
           SUM(CASE WHEN status = 'dipinjam' THEN 1 ELSE 0 END) as sedang_dipinjam,
+          SUM(CASE WHEN status = 'pending_return' THEN 1 ELSE 0 END) as pending_return,
           SUM(CASE WHEN status = 'dikembalikan' THEN 1 ELSE 0 END) as sudah_dikembalikan,
           SUM(CASE WHEN status = 'terlambat' THEN 1 ELSE 0 END) as terlambat,
           SUM(CASE WHEN status = 'hilang' THEN 1 ELSE 0 END) as hilang
@@ -58,11 +59,11 @@ router.get('/', requireAuth, async (req, res) => {
         LIMIT 10
       `);
 
-      // Overdue borrowings
+      // Overdue borrowings (including pending returns that are overdue)
       const [overdueBorrowings] = await db.execute(`
         SELECT COUNT(*) as total_terlambat
         FROM peminjaman 
-        WHERE status = 'dipinjam' 
+        WHERE status IN ('dipinjam', 'pending_return') 
         AND tanggal_kembali_rencana < CURDATE()
       `);
 
@@ -92,8 +93,9 @@ router.get('/', requireAuth, async (req, res) => {
         SELECT 
           COUNT(*) as total_peminjaman_saya,
           SUM(CASE WHEN status = 'dipinjam' THEN 1 ELSE 0 END) as sedang_dipinjam,
+          SUM(CASE WHEN status = 'pending_return' THEN 1 ELSE 0 END) as pending_return,
           SUM(CASE WHEN status = 'dikembalikan' THEN 1 ELSE 0 END) as sudah_dikembalikan,
-          SUM(CASE WHEN status = 'terlambat' THEN 1 ELSE 0 END) as terlambat_saya
+          SUM(CASE WHEN status = 'terlambat' OR (status IN ('dipinjam', 'pending_return') AND tanggal_kembali_rencana < CURDATE()) THEN 1 ELSE 0 END) as terlambat_saya
         FROM peminjaman 
         WHERE peminjam_id = ?
       `, [user.userId]);
@@ -108,7 +110,7 @@ router.get('/', requireAuth, async (req, res) => {
           DATEDIFF(CURDATE(), p.tanggal_kembali_rencana) as hari_terlambat
         FROM peminjaman p
         LEFT JOIN produk pr ON p.produk_id = pr.id
-        WHERE p.peminjam_id = ? AND p.status IN ('dipinjam', 'terlambat')
+        WHERE p.peminjam_id = ? AND p.status IN ('dipinjam', 'terlambat', 'pending_return')
         ORDER BY p.tanggal_pinjam DESC
         LIMIT 5
       `, [user.userId]);
@@ -149,8 +151,9 @@ router.get('/quick', requireAuth, async (req, res) => {
         SELECT 
           (SELECT COUNT(*) FROM pengguna) as total_users,
           (SELECT COUNT(*) FROM produk) as total_products,
-          (SELECT COUNT(*) FROM peminjaman WHERE status = 'dipinjam') as active_borrowings,
-          (SELECT COUNT(*) FROM peminjaman WHERE status = 'dipinjam' AND tanggal_kembali_rencana < CURDATE()) as overdue_borrowings
+          (SELECT COUNT(*) FROM peminjaman WHERE status IN ('dipinjam', 'pending_return')) as active_borrowings,
+          (SELECT COUNT(*) FROM peminjaman WHERE status IN ('dipinjam', 'pending_return') AND tanggal_kembali_rencana < CURDATE()) as overdue_borrowings,
+          (SELECT COUNT(*) FROM peminjaman WHERE status = 'pending_return') as pending_returns
       `);
 
       res.json({
@@ -161,8 +164,9 @@ router.get('/quick', requireAuth, async (req, res) => {
       const [userStats] = await db.execute(`
         SELECT 
           COUNT(*) as my_total_borrowings,
-          SUM(CASE WHEN status = 'dipinjam' THEN 1 ELSE 0 END) as my_active_borrowings,
-          SUM(CASE WHEN status = 'terlambat' OR (status = 'dipinjam' AND tanggal_kembali_rencana < CURDATE()) THEN 1 ELSE 0 END) as my_overdue_borrowings
+          SUM(CASE WHEN status IN ('dipinjam', 'pending_return') THEN 1 ELSE 0 END) as my_active_borrowings,
+          SUM(CASE WHEN status = 'pending_return' THEN 1 ELSE 0 END) as my_pending_returns,
+          SUM(CASE WHEN status = 'terlambat' OR (status IN ('dipinjam', 'pending_return') AND tanggal_kembali_rencana < CURDATE()) THEN 1 ELSE 0 END) as my_overdue_borrowings
         FROM peminjaman 
         WHERE peminjam_id = ?
       `, [user.userId]);
